@@ -1,0 +1,9 @@
+{
+  "name": "AutoTrader – Random Signals",
+  "description": "Generate crypto trade signals on a schedule (supports random, heuristic, AI, Sorin methods).",
+  "version": "0.1.0",
+  "entry": {
+    "command": "python3 skills/clawapp-autotrader/trader.py",
+    "workdir": "."
+  }
+}

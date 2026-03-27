@@ -1,0 +1,8 @@
+# Required for Real trading (Coinbase Ed25519/EdDSA JWT auth)
+pyjwt>=2.8.0
+cryptography>=41.0.0
+
+# Optional — needed for AI and Sorin signal methods
+# Install whichever provider you have a key for (or both)
+anthropic>=0.30.0      # if using an Anthropic key
+openai>=1.57.0         # if using an OpenAI key (1.57+ required for httpx 0.28 compat)

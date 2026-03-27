@@ -1,0 +1,1324 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClawApp AutoTrader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --bg:        #0d0f14;
+      --surface:   #131620;
+      --surface2:  #1a1e2e;
+      --border:    #1f2535;
+      --border2:   #2a3045;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --green:     #10b981;
+      --green-dim: rgba(16,185,129,0.12);
+      --red:       #ef4444;
+      --red-dim:   rgba(239,68,68,0.12);
+      --amber:     #f59e0b;
+      --amber-dim: rgba(245,158,11,0.12);
+      --blue:      #3b82f6;
+      --blue-dim:  rgba(59,130,246,0.12);
+      --purple:    #a855f7;
+      --purple-dim:rgba(168,85,247,0.12);
+    }
+    html, body, #root {
+      height: 100%; margin: 0;
+      background: var(--bg); color: var(--text);
+      font-family: 'Inter', sans-serif; font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    * { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+    *::-webkit-scrollbar { width: 4px; }
+    *::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+    @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.35} }
+    @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes flash   { 0%{opacity:1} 30%{opacity:0.85} 100%{opacity:1} }
+    @keyframes fadeIn  { from{opacity:0} to{opacity:1} }
+    .pulse    { animation: pulse 2s ease-in-out infinite; }
+    .slide-in { animation: slideIn 0.25s ease-out; }
+    .flash    { animation: flash 0.4s ease-out; }
+    .fade-in  { animation: fadeIn 0.3s ease-out; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    input[type=number] { -moz-appearance: textfield; }
+    button { font-family: 'Inter', sans-serif; }
+    table { border-collapse: collapse; }
+    th, td { text-align: left; }
+    .remove-btn { opacity: 0.4; transition: opacity 0.12s; }
+    .remove-btn:hover { opacity: 1; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// ─── Storage helpers ──────────────────────────────────────────────────────────
+
+function lsGet(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
+}
+function lsSet(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+
+// ─── API ─────────────────────────────────────────────────────────────────────
+
+const API = {
+  state:    ()  => fetch('/api/state').then(r=>r.json()),
+  accounts: ()  => fetch('/api/accounts').then(r=>r.json()),
+  setup:    ()  => fetch('/api/setup').then(r=>r.json()),
+  check:    ()  => fetch('/api/check',{method:'POST'}).then(r=>{ if(!r.ok) return r.json().then(j=>Promise.reject(j.error||r.statusText)); return r.json(); }),
+  approve:  id  => fetch(`/api/approve/${id}`,{method:'POST'}).then(r=>{ if(!r.ok) return r.json().then(j=>Promise.reject(j.error||r.statusText)); return r.json(); }),
+  dismiss:  id  => fetch(`/api/dismiss/${id}`,{method:'POST'}).then(r=>r.json()),
+  policy:   p   => fetch('/api/policy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).then(r=>r.json()),
+  reset:    ()  => fetch('/api/reset',{method:'POST'}).then(r=>r.json()),
+};
+
+// ─── Formatters ───────────────────────────────────────────────────────────────
+
+function relTime(d) {
+  const ms = typeof d === 'string' ? new Date(d).getTime() : d.getTime();
+  const s  = Math.floor((Date.now() - ms) / 1000);
+  if(s<5)    return 'just now';
+  if(s<60)   return `${s}s ago`;
+  if(s<3600) return `${Math.floor(s/60)}m ago`;
+  if(s<86400) return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`;
+}
+
+function formatIntervalShort(ms) {
+  if (ms == null || ms < 0) return null;
+  if (ms >= 86400000) return Math.round(ms / 86400000) + 'd';
+  if (ms >= 3600000)  return Math.round(ms / 3600000) + 'h';
+  if (ms >= 60000)    return Math.round(ms / 60000) + 'm';
+  if (ms >= 1000)     return Math.round(ms / 1000) + 's';
+  return ms + 'ms';
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatRuntime(lastResetAtIso) {
+  if (!lastResetAtIso) return '—';
+  const s = Math.floor((Date.now() - new Date(lastResetAtIso).getTime()) / 1000);
+  if (s < 0) return '—';
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  if (h < 24) return mm ? `${h}h ${mm}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const hh = h % 24;
+  return hh ? `${d}d ${hh}h` : `${d}d`;
+}
+
+function fmtUsd(n, decimals=2) {
+  if (n == null || isNaN(n)) return '—';
+  return '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+function fmtQty(qty, asset) {
+  if (asset === 'BTC') return qty.toFixed(6);
+  if (qty < 0.01)      return qty.toFixed(6);
+  if (qty < 1)         return qty.toFixed(4);
+  if (qty < 100)       return qty.toFixed(2);
+  return qty.toFixed(0);
+}
+
+// ─── Position computation ─────────────────────────────────────────────────────
+
+function computePositions(trades, prices) {
+  const pos = {};
+  for (const t of trades) {
+    if (!pos[t.asset]) pos[t.asset] = { qty: 0, costBasis: 0 };
+    const p = pos[t.asset];
+    const tokens = t.size / t.fillPrice;
+    if (t.direction === 'BUY') {
+      p.qty       += tokens;
+      p.costBasis += t.size;
+    } else {
+      if (p.qty > 1e-10) {
+        const ratio = Math.min(tokens / p.qty, 1);
+        p.costBasis *= (1 - ratio);
+        p.qty = Math.max(0, p.qty - tokens);
+      }
+    }
+  }
+  return Object.entries(pos)
+    .filter(([, p]) => p.qty > 1e-8)
+    .map(([asset, p]) => {
+      const cp = prices[asset]?.price || 0;
+      const cv = p.qty * cp;
+      const pnl = cv - p.costBasis;
+      return {
+        asset,
+        qty:          p.qty,
+        avgEntry:     p.costBasis / p.qty,
+        costBasis:    p.costBasis,
+        currentPrice: cp,
+        currentValue: cv,
+        pnl,
+        pnlPct: p.costBasis > 0 ? (pnl / p.costBasis) * 100 : 0,
+        priceLoading: prices[asset]?.loading ?? true,
+      };
+    });
+}
+
+// ─── Now hook (re-renders every intervalMs for live countdowns) ───────────────
+
+function useNow(intervalMs = 30000) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+  return now;
+}
+
+// ─── Price ticker hook ────────────────────────────────────────────────────────
+// watchedAssets: string[] — dynamic list, independent of policy.assets
+
+function usePriceTicker(watchedAssets) {
+  const [prices, setPrices] = useState({});
+  const [flashKey, setFlashKey] = useState(0);
+
+  const assetsKey = watchedAssets.join(',');
+
+  useEffect(() => {
+    if (watchedAssets.length === 0) return;
+
+    // Initialise any new assets so cards render immediately with loading state
+    setPrices(prev => {
+      const next = { ...prev };
+      watchedAssets.forEach(a => { if (!next[a]) next[a] = { price: 0, change24h: 0, loading: true }; });
+      return next;
+    });
+
+    async function refresh() {
+      const results = await Promise.allSettled(
+        watchedAssets.map(a =>
+          fetch(`https://api.exchange.coinbase.com/products/${a}-USD/stats`,
+                { headers: { 'User-Agent': 'ClawApp-AutoTrader/1.0' } })
+            .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        )
+      );
+      setPrices(prev => {
+        const next = { ...prev };
+        watchedAssets.forEach((a, i) => {
+          const r = results[i];
+          if (r.status === 'fulfilled' && r.value?.last) {
+            const p = parseFloat(r.value.last), o = parseFloat(r.value.open);
+            next[a] = { price: p, change24h: o ? ((p-o)/o)*100 : 0, loading: false };
+          } else {
+            const old = prev[a] || { price: 0, change24h: 0 };
+            next[a] = {
+              price: old.price > 0 ? old.price * (1 + (Math.random()-0.5)*0.001) : 0,
+              change24h: old.change24h,
+              loading: false,
+              notFound: r.status === 'rejected',
+            };
+          }
+        });
+        return next;
+      });
+      setFlashKey(k => k+1);
+    }
+
+    refresh();
+    const t = setInterval(refresh, 12000);
+    return () => clearInterval(t);
+  }, [assetsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { prices, flashKey };
+}
+
+// ─── AddTickerInput ───────────────────────────────────────────────────────────
+
+function AddTickerInput({ onAdd, placeholder = 'e.g. SOL', existing = [] }) {
+  const [val, setVal] = useState('');
+  const [err, setErr] = useState('');
+
+  function submit() {
+    const ticker = val.trim().toUpperCase();
+    if (!ticker) return;
+    if (existing.includes(ticker)) { setErr(`${ticker} already added`); return; }
+    if (!/^[A-Z0-9]{1,10}$/.test(ticker)) { setErr('Invalid ticker'); return; }
+    onAdd(ticker);
+    setVal('');
+    setErr('');
+  }
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:4,marginTop:4}}>
+        <input
+          value={val}
+          onChange={e => { setVal(e.target.value.toUpperCase()); setErr(''); }}
+          onKeyDown={e => e.key === 'Enter' && submit()}
+          placeholder={placeholder}
+          style={{flex:1,background:'var(--surface)',border:'1px solid var(--border)',
+            borderRadius:5,padding:'4px 8px',fontSize:11,color:'var(--text)',
+            fontFamily:'JetBrains Mono',outline:'none',minWidth:0}}
+        />
+        <button onClick={submit}
+          style={{padding:'4px 10px',fontSize:11,fontWeight:600,background:'var(--blue-dim)',
+            border:'1px solid var(--blue)',borderRadius:5,color:'var(--blue)',cursor:'pointer',
+            whiteSpace:'nowrap'}}>
+          + Add
+        </button>
+      </div>
+      {err && <div style={{fontSize:10,color:'var(--red)',marginTop:3}}>{err}</div>}
+    </div>
+  );
+}
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function PriceCard({ asset, price, change24h, loading, notFound, flashKey, onRemove }) {
+  const pos = change24h >= 0;
+  return (
+    <div style={{position:'relative',background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,
+      padding:'8px 10px'}}>
+      {onRemove && (
+        <button className="remove-btn" onClick={onRemove}
+          style={{position:'absolute',top:3,right:4,background:'transparent',border:'none',
+            cursor:'pointer',color:'var(--muted)',fontSize:11,lineHeight:1,padding:'0 1px',fontWeight:700}}>
+          ×
+        </button>
+      )}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:3,paddingRight:onRemove?12:0}}>
+        <span style={{fontSize:10,fontWeight:600,color:'var(--muted)'}}>{asset}/USD</span>
+        {!loading && !notFound && (
+          <span style={{fontSize:11,fontFamily:'JetBrains Mono',fontWeight:500,color:pos?'var(--green)':'var(--red)'}}>
+            {pos?'+':''}{change24h.toFixed(2)}%
+          </span>
+        )}
+      </div>
+      {loading ? (
+        <div style={{height:18,background:'var(--border)',borderRadius:3,animation:'pulse 1.5s ease-in-out infinite'}} />
+      ) : notFound ? (
+        <span style={{fontSize:12,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>not found</span>
+      ) : (
+        <span key={flashKey} className="mono" style={{fontSize:15,fontWeight:700,letterSpacing:'-0.5px',color:'var(--text)'}}>
+          {fmtUsd(price, price >= 1 ? 2 : 4)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Toggle({ left, right, value, onChange, activeColor='default' }) {
+  const colors = { default:'var(--text)', blue:'#fff', amber:'#fff' };
+  const bgs    = { default:'var(--surface)', blue:'var(--blue)', amber:'var(--amber)' };
+  return (
+    <div style={{display:'flex',background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,overflow:'hidden',padding:3,gap:3}}>
+      {[left,right].map((label,i)=>{
+        const isLeft = i===0;
+        const active = isLeft ? value===left : value===right;
+        const ac = active && !isLeft ? activeColor : 'default';
+        return (
+          <button key={label} onClick={()=>onChange(label)}
+            style={{flex:1,padding:'6px 0',fontSize:12,fontWeight:600,border:'none',borderRadius:6,cursor:'pointer',
+              transition:'all 0.15s',
+              background:active?bgs[ac]:'transparent',
+              color:active?colors[ac]:'var(--muted)',
+              boxShadow:active?'0 1px 3px rgba(0,0,0,0.3)':'none'}}>
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const CONF_STYLE = {
+  High:  {bg:'var(--green-dim)',border:'var(--green)',text:'var(--green)'},
+  Medium:{bg:'var(--blue-dim)', border:'var(--blue)', text:'var(--blue)'},
+  Low:   {bg:'var(--amber-dim)',border:'var(--amber)',text:'var(--amber)'},
+};
+const STATUS_STYLE = {
+  'auto-executed':{bg:'var(--green-dim)',border:'var(--green)',text:'var(--green)',label:'✓ Auto-executed'},
+  held:           {bg:'var(--amber-dim)',border:'var(--amber)',text:'var(--amber)',label:'⚠ Held'},
+  approved:       {bg:'var(--green-dim)',border:'var(--green)',text:'var(--green)',label:'✓ Approved'},
+  dismissed:      {bg:'var(--surface2)', border:'var(--border)',text:'var(--muted)',label:'✕ Dismissed'},
+};
+
+const METHOD_STYLE = {
+  random:    {color:'var(--muted)',    label:'Random'},
+  heuristic: {color:'var(--purple)',   label:'Heuristic'},
+  ai:        {color:'var(--green)',    label:'Simple AI'},
+  sorin:     {color:'var(--amber)',    label:'Sorin AI'},
+};
+
+function SignalCard({ signal, approvalMode, onApprove, onDismiss }) {
+  const { asset, direction, size, price, reasoning, confidence, signalMethod, timestamp, status, guardrailReason } = signal;
+  const isBuy = direction==='BUY';
+  const dc = isBuy?'var(--green)':'var(--red)';
+  const db = isBuy?'var(--green-dim)':'var(--red-dim)';
+  const cs = CONF_STYLE[confidence]||CONF_STYLE.Medium;
+  const ss = STATUS_STYLE[status];
+  const ms = METHOD_STYLE[signalMethod||'random'];
+  const isPending = status==='pending';
+
+  return (
+    <div className="slide-in" style={{background:'var(--surface)',border:`1px solid ${isPending?'var(--border2)':'var(--border)'}`,
+      borderRadius:10,padding:'12px 14px',display:'flex',flexDirection:'column',gap:10,
+      opacity:status==='dismissed'?0.45:1,transition:'opacity 0.2s'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontFamily:'JetBrains Mono',fontWeight:700,fontSize:13}}>{asset}</span>
+          <span style={{padding:'2px 7px',fontSize:11,fontWeight:700,borderRadius:4,
+            background:db,color:dc,border:`1px solid ${dc}`,fontFamily:'JetBrains Mono',letterSpacing:'0.04em'}}>{direction}</span>
+          <span style={{fontSize:12,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>${size}</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:4}}>
+          <span style={{padding:'2px 7px',fontSize:10,fontWeight:600,borderRadius:4,
+            color:ms.color,border:`1px solid ${ms.color}`,background:'transparent',
+            letterSpacing:'0.05em',opacity:0.75}}>{ms.label}</span>
+          <span style={{padding:'2px 7px',fontSize:10,fontWeight:600,borderRadius:4,
+            background:cs.bg,color:cs.text,border:`1px solid ${cs.border}`,letterSpacing:'0.05em'}}>{confidence}</span>
+        </div>
+      </div>
+      <div style={{fontSize:11,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>
+        @ {fmtUsd(price)}
+        <span style={{margin:'0 6px',color:'var(--border2)'}}>·</span>
+        {relTime(timestamp)}
+      </div>
+      <p style={{margin:0,fontSize:12,color:'#94a3b8',lineHeight:1.55}}>{reasoning}</p>
+      {guardrailReason && (
+        <div style={{fontSize:11,color:'var(--amber)',background:'var(--amber-dim)',border:'1px solid var(--amber)',borderRadius:6,padding:'5px 9px'}}>
+          Guardrail: {guardrailReason}
+        </div>
+      )}
+      {approvalMode==='manual' && isPending ? (
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={()=>onApprove(signal.id)}
+            style={{flex:1,padding:'7px 0',background:'var(--green-dim)',border:'1px solid var(--green)',
+              borderRadius:6,color:'var(--green)',fontSize:12,fontWeight:600,cursor:'pointer'}}>
+            ✓ Approve
+          </button>
+          <button onClick={()=>onDismiss(signal.id)}
+            style={{flex:1,padding:'7px 0',background:'transparent',border:'1px solid var(--border2)',
+              borderRadius:6,color:'var(--muted)',fontSize:12,fontWeight:600,cursor:'pointer'}}>
+            ✕ Dismiss
+          </button>
+        </div>
+      ) : ss ? (
+        <div className="fade-in" style={{padding:'5px 9px',fontSize:11,fontWeight:600,borderRadius:6,
+          background:ss.bg,color:ss.text,border:`1px solid ${ss.border}`,alignSelf:'flex-start'}}>
+          {ss.label}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TradeEntry({ trade }) {
+  const isBuy = trade.direction==='BUY';
+  const dc = isBuy?'var(--green)':'var(--red)';
+  const db = isBuy?'var(--green-dim)':'var(--red-dim)';
+  return (
+    <div style={{padding:'11px 14px',background:'var(--surface)',border:'1px solid var(--border)',
+      borderRadius:8,display:'flex',flexDirection:'column',gap:6}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontFamily:'JetBrains Mono',fontWeight:700,fontSize:13}}>{trade.asset}</span>
+          <span style={{padding:'1px 6px',fontSize:10,fontWeight:700,borderRadius:3,
+            background:db,color:dc,border:`1px solid ${dc}`,fontFamily:'JetBrains Mono'}}>{trade.direction}</span>
+          <span style={{fontSize:12,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>${trade.size}</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:4}}>
+          {trade.mode==='real' && (
+            <span style={{fontSize:9,fontWeight:700,color:'var(--amber)',background:'var(--amber-dim)',
+              border:'1px solid var(--amber)',borderRadius:3,padding:'1px 5px',letterSpacing:'0.06em'}}>LIVE</span>
+          )}
+          {trade.approvalMode==='policy' && (
+            <span style={{fontSize:9,fontWeight:700,color:'var(--blue)',background:'var(--blue-dim)',
+              border:'1px solid var(--blue)',borderRadius:3,padding:'1px 5px',letterSpacing:'0.06em'}}>AUTO</span>
+          )}
+          {trade.approvalMode==='manual' && (
+            <span style={{fontSize:9,fontWeight:700,color:'var(--muted)',background:'var(--surface2)',
+              border:'1px solid var(--border)',borderRadius:3,padding:'1px 5px',letterSpacing:'0.06em'}}>MANUAL</span>
+          )}
+          <span style={{fontSize:11,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>{relTime(trade.timestamp)}</span>
+        </div>
+      </div>
+      <div style={{fontSize:12,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>
+        filled @ {fmtUsd(trade.fillPrice)}
+        {trade.orderId && <span style={{marginLeft:8,fontSize:10,opacity:0.6}}>#{trade.orderId}</span>}
+      </div>
+      <p style={{margin:0,fontSize:11,color:'#64748b',lineHeight:1.45,
+        display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
+        {trade.reasoning}
+      </p>
+    </div>
+  );
+}
+
+// ─── Stats Bar ────────────────────────────────────────────────────────────────
+
+function StatsBar({ trades, signals, prices, policy, cbAccounts }) {
+  const execMode   = policy.execMode || 'paper';
+  const localPos   = useMemo(() => computePositions(trades, prices), [trades, prices]);
+
+  // In real mode, derive portfolio value from live Coinbase balances
+  const realPos = useMemo(() => {
+    if (!cbAccounts) return null;
+    return cbAccounts
+      .filter(a => a.currency !== 'USD')
+      .map(a => {
+        const cp = prices[a.currency]?.price || 0;
+        return { asset: a.currency, qty: a.balance, currentValue: a.balance * cp,
+                 priceLoading: prices[a.currency]?.loading ?? true };
+      });
+  }, [cbAccounts, prices]);
+
+  const positions      = execMode === 'real' && realPos ? realPos : localPos;
+  const usdBalance     = execMode === 'real' ? (cbAccounts?.find(a=>a.currency==='USD')?.balance || 0) : 0;
+  const portfolioValue = positions.reduce((s, p) => p.priceLoading ? s : s + p.currentValue, 0) + usdBalance;
+  const unrealizedPnl  = execMode === 'real' ? null : localPos.reduce((s, p) => p.priceLoading ? s : s + p.pnl, 0);
+
+  const today = todayIso();
+  const todayTrades  = trades.filter(t => t.timestamp?.startsWith(today));
+  const dailyPnl     = todayTrades.reduce((s, t) => t.direction === 'SELL' ? s + t.size : s - t.size, 0);
+  const filledToday  = todayTrades.length;
+  const pendingCount = signals.filter(s => s.status === 'pending').length;
+  const capLeft      = (policy.dailyCap || 0) - (policy.dailySpent || 0);
+
+  const pnlColor = n => n >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlSign  = n => n >= 0 ? '+' : '';
+
+  return (
+    <div style={{background:'var(--surface)',borderBottom:'1px solid var(--border)',
+      display:'flex',alignItems:'center',padding:'0 20px',flexShrink:0,height:52,gap:0,overflowX:'auto'}}>
+      <StatBarChip
+        label="Portfolio"
+        value={positions.some(p=>p.priceLoading) ? '…' : fmtUsd(portfolioValue)}
+        color="var(--text)"
+      />
+      <StatBarSep />
+      <StatBarChip
+        label="Unrealized P&L"
+        value={unrealizedPnl == null ? '—' : positions.length === 0 ? '—' : `${pnlSign(unrealizedPnl)}${fmtUsd(unrealizedPnl)} (${pnlSign(unrealizedPnl)}${(unrealizedPnl/(portfolioValue-unrealizedPnl||1)*100).toFixed(1)}%)`}
+        color={unrealizedPnl == null || positions.length === 0 ? 'var(--muted)' : pnlColor(unrealizedPnl)}
+      />
+      <StatBarSep />
+      <StatBarChip
+        label="Daily Realized P&L"
+        value={todayTrades.length === 0 ? '—' : `${pnlSign(dailyPnl)}${fmtUsd(dailyPnl)}`}
+        color={todayTrades.length === 0 ? 'var(--muted)' : pnlColor(dailyPnl)}
+      />
+      <StatBarSep />
+      <StatBarChip
+        label="Daily Cap Left"
+        value={`${fmtUsd(capLeft)} / ${fmtUsd(policy.dailyCap||0,0)}`}
+        color={capLeft < 20 ? 'var(--red)' : capLeft < 50 ? 'var(--amber)' : 'var(--muted)'}
+      />
+      <StatBarSep />
+      <StatBarChip
+        label="Trades Today"
+        value={`${filledToday} filled${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`}
+        color="var(--muted)"
+      />
+    </div>
+  );
+}
+
+function StatBarChip({ label, value, color }) {
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:2,padding:'0 16px',flexShrink:0}}>
+      <span style={{fontSize:10,color:'var(--muted)',fontWeight:500,letterSpacing:'0.04em',whiteSpace:'nowrap'}}>{label}</span>
+      <span style={{fontSize:13,fontWeight:700,color,fontFamily:'JetBrains Mono',whiteSpace:'nowrap'}}>{value}</span>
+    </div>
+  );
+}
+
+function StatBarSep() {
+  return <div style={{width:1,height:28,background:'var(--border)',flexShrink:0}} />;
+}
+
+// ─── Positions Panel ──────────────────────────────────────────────────────────
+
+function PositionsPanel({ trades, prices, execMode, cbAccounts }) {
+  const [open, setOpen] = useState(true);
+  const pnlColor = n => n >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlSign  = n => n >= 0 ? '+' : '';
+
+  // Real mode: use Coinbase balances. Paper mode: replay local trades.
+  const positions = useMemo(() => {
+    if (execMode === 'real' && cbAccounts) {
+      return cbAccounts
+        .filter(a => a.currency !== 'USD' && a.balance > 0)
+        .map(a => {
+          const cp = prices[a.currency]?.price || 0;
+          const cv = a.balance * cp;
+          return { asset: a.currency, qty: a.balance, currentPrice: cp, currentValue: cv,
+                   avgEntry: null, pnl: null, pnlPct: null,
+                   priceLoading: prices[a.currency]?.loading ?? true };
+        });
+    }
+    return computePositions(trades, prices);
+  }, [execMode, cbAccounts, trades, prices]);
+
+  return (
+    <div style={{background:'var(--surface)',borderTop:'1px solid var(--border)',flexShrink:0}}>
+      <div onClick={() => setOpen(o => !o)}
+        style={{padding:'7px 20px',display:'flex',alignItems:'center',gap:10,cursor:'pointer',
+          borderBottom: open ? '1px solid var(--border)' : 'none', userSelect:'none'}}>
+        <span style={{fontSize:11,fontWeight:600,color:'var(--muted)',letterSpacing:'0.08em',textTransform:'uppercase'}}>
+          Open Positions
+        </span>
+        <span style={{fontSize:11,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>
+          {positions.length} position{positions.length !== 1 ? 's' : ''}
+        </span>
+        <div style={{flex:1}} />
+        <span style={{fontSize:11,color:'var(--muted)',marginRight:4}}>
+          {execMode === 'real' ? '⚡ Live' : '◎ Simulated'}
+        </span>
+        <span style={{fontSize:11,color:'var(--muted)'}}>{open ? '▾' : '▸'}</span>
+      </div>
+
+      {open && (
+        <div style={{overflowX:'auto',padding:'0 20px 10px',maxHeight:160,overflowY:'auto'}}>
+          {positions.length === 0 ? (
+            <div style={{padding:'20px 0',textAlign:'center',color:'var(--muted)',fontSize:12}}>
+              No open positions
+            </div>
+          ) : (
+            <table style={{width:'100%',minWidth:600}}>
+              <thead>
+                <tr>
+                  {['Asset','Quantity','Current Price','Value'].map(h => (
+                    <th key={h} style={{fontSize:10,fontWeight:600,color:'var(--muted)',padding:'6px 12px 6px 0',
+                      letterSpacing:'0.06em',textTransform:'uppercase',whiteSpace:'nowrap',fontFamily:'Inter'}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {positions.map(p => (
+                  <tr key={p.asset} style={{borderTop:'1px solid var(--border)'}}>
+                    <td style={{padding:'7px 12px 7px 0'}}>
+                      <span style={{fontFamily:'JetBrains Mono',fontWeight:700,fontSize:13}}>{p.asset}</span>
+                    </td>
+                    <td style={{padding:'7px 12px 7px 0',fontFamily:'JetBrains Mono',fontSize:12,color:'var(--text)'}}>
+                      {fmtQty(p.qty, p.asset)}
+                    </td>
+                    <td style={{padding:'7px 12px 7px 0',fontFamily:'JetBrains Mono',fontSize:12,color:'var(--text)'}}>
+                      {p.priceLoading ? '…' : fmtUsd(p.currentPrice, p.currentPrice >= 1 ? 2 : 4)}
+                    </td>
+                    <td style={{padding:'7px 0 7px 0',fontFamily:'JetBrains Mono',fontSize:12,color:'var(--text)'}}>
+                      {p.priceLoading ? '…' : fmtUsd(p.currentValue)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Signal params (time windows & hyperparams) ───────────────────────────────
+
+const CANDLE_GRAN_OPTIONS = [
+  { value: 60,   label: '1m' },
+  { value: 300,  label: '5m' },
+  { value: 900,  label: '15m' },
+  { value: 3600, label: '1h' },
+];
+
+function SignalParamsPanel({ policy, setPolicy }) {
+  const [open, setOpen] = useState(false);
+  const g  = policy.candleGranularity ?? 300;
+  const n  = policy.candleCount ?? 25;
+  const r  = policy.rsiPeriod ?? 14;
+  const lb = policy.momentumLookbackCandles ?? 5;
+  const ac = policy.aiCandlesInPrompt ?? 10;
+  const sm = policy.sorinAnalysisMaxChars ?? 3000;
+
+  function update(key, value) {
+    const v = typeof value === 'string' ? parseInt(value, 10) : value;
+    if (isNaN(v)) return;
+    setPolicy(p => ({ ...p, [key]: v }));
+  }
+
+  return (
+    <div style={{marginTop:8}}>
+      <div onClick={() => setOpen(o => !o)}
+        style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',userSelect:'none',fontSize:11,color:'var(--muted)',fontWeight:600}}>
+        <span>{open ? '▾' : '▸'}</span>
+        <span>Time windows & hyperparams</span>
+      </div>
+      {open && (
+        <div style={{marginTop:6,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',display:'flex',flexDirection:'column',gap:10}}>
+          <FieldGroup label="Candle interval">
+            <select value={g} onChange={e=>update('candleGranularity', e.target.value)}
+              style={{width:'100%',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:12,color:'var(--text)',fontFamily:'JetBrains Mono',cursor:'pointer'}}>
+              {CANDLE_GRAN_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </FieldGroup>
+          <FieldGroup label="Candle lookback (count)">
+            <input type="number" min={5} max={200} value={n} onChange={e=>update('candleCount', e.target.value)}
+              style={{width:'100%',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:12,color:'var(--text)',fontFamily:'JetBrains Mono'}} />
+          </FieldGroup>
+          <FieldGroup label="RSI period">
+            <input type="number" min={2} max={50} value={r} onChange={e=>update('rsiPeriod', e.target.value)}
+              style={{width:'100%',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:12,color:'var(--text)',fontFamily:'JetBrains Mono'}} />
+          </FieldGroup>
+          <FieldGroup label="Momentum lookback (candles)">
+            <input type="number" min={1} max={50} value={lb} onChange={e=>update('momentumLookbackCandles', e.target.value)}
+              style={{width:'100%',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:12,color:'var(--text)',fontFamily:'JetBrains Mono'}} />
+          </FieldGroup>
+          {(policy.signalMethod==='ai' || policy.signalMethod==='sorin') && (
+            <FieldGroup label="AI candles in prompt">
+              <input type="number" min={1} max={50} value={ac} onChange={e=>update('aiCandlesInPrompt', e.target.value)}
+                style={{width:'100%',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:12,color:'var(--text)',fontFamily:'JetBrains Mono'}} />
+            </FieldGroup>
+          )}
+          {policy.signalMethod==='sorin' && (
+            <FieldGroup label="Sorin analysis max chars">
+              <input type="number" min={500} max={15000} step={500} value={sm} onChange={e=>update('sorinAnalysisMaxChars', e.target.value)}
+                style={{width:'100%',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:12,color:'var(--text)',fontFamily:'JetBrains Mono'}} />
+            </FieldGroup>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Panels ──────────────────────────────────────────────────────────────────
+
+function LeftPanel({ prices, flashKey, execMode, setExecMode,
+                     approvalMode, setApprovalMode, policy, setPolicy,
+                     watchedAssets, addWatched, removeWatched,
+                     onCheckNow, checking, checkError }) {
+  const spentPct   = (policy.dailySpent/policy.dailyCap)*100;
+
+  function addAllowedAsset(ticker) {
+    setPolicy(p => {
+      if (p.assets.includes(ticker)) return p;
+      return { ...p, assets: [...p.assets, ticker] };
+    });
+  }
+
+  function removeAllowedAsset(ticker) {
+    setPolicy(p => {
+      if (p.assets.length <= 1) return p; // keep at least one
+      return { ...p, assets: p.assets.filter(a => a !== ticker) };
+    });
+  }
+
+  return (
+    <div style={{width:288,minWidth:288,background:'var(--surface)',borderRight:'1px solid var(--border)',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      {/* Header */}
+      <div style={{padding:'16px 16px 12px',borderBottom:'1px solid var(--border)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:18}}>🦞</span>
+          <span style={{fontSize:15,fontWeight:700,letterSpacing:'-0.3px'}}>ClawApp AutoTrader</span>
+          <span style={{fontSize:10,color:'var(--blue)',fontWeight:600,letterSpacing:'0.08em',
+            background:'var(--blue-dim)',padding:'1px 5px',borderRadius:3}}>BETA</span>
+        </div>
+      </div>
+
+      <div style={{flex:1,overflowY:'auto',padding:'14px 16px',display:'flex',flexDirection:'column',gap:14}}>
+
+        {/* Live Prices — user-controlled ticker list */}
+        <Section label="Live Prices">
+          {watchedAssets.length > 0 ? (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5}}>
+              {watchedAssets.map(a => (
+                <PriceCard key={a} asset={a} {...(prices[a]||{price:0,change24h:0,loading:true})}
+                  flashKey={flashKey}
+                  onRemove={() => removeWatched(a)} />
+              ))}
+            </div>
+          ) : (
+            <div style={{fontSize:12,color:'var(--muted)',padding:'10px 0',textAlign:'center'}}>
+              No tickers — add one below
+            </div>
+          )}
+          <AddTickerInput onAdd={addWatched} placeholder="e.g. SOL" existing={watchedAssets} />
+        </Section>
+
+        <Divider />
+
+        {/* Execution mode */}
+        <Section label="Trading Mode">
+          <Toggle left="Simulated" right="⚡ Live" value={execMode==='paper'?'Simulated':'⚡ Live'}
+            onChange={v=>setExecMode(v==='Simulated'?'paper':'real')} activeColor="amber" />
+          {execMode==='paper' && (
+            <div style={{fontSize:11,color:'var(--muted)',lineHeight:1.4}}>
+              Simulated trades — no real money involved.
+            </div>
+          )}
+          {execMode==='real' && (
+            <div style={{fontSize:11,color:'var(--amber)',background:'var(--amber-dim)',
+              border:'1px solid var(--amber)',borderRadius:6,padding:'6px 10px',lineHeight:1.4}}>
+              Live Coinbase execution. Real funds at risk.
+            </div>
+          )}
+        </Section>
+
+        <Divider />
+
+        {/* Signal method */}
+        <Section label="Signal Method">
+          <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+            {['random','heuristic','ai','sorin'].map(m => {
+              const active = (policy.signalMethod||'random') === m;
+              const labels = {random:'Random',heuristic:'Heuristic',ai:'Simple AI',sorin:'Sorin AI'};
+              const colors = {random:'var(--muted)',heuristic:'var(--purple)',ai:'var(--green)',sorin:'var(--amber)'};
+              const dimColors = {random:'transparent',heuristic:'var(--purple-dim)',ai:'var(--green-dim)',sorin:'var(--amber-dim)'};
+              return (
+                <button key={m} onClick={()=>setPolicy(p=>({...p,signalMethod:m}))}
+                  style={{flex:1,padding:'5px 0',fontSize:11,fontWeight:600,borderRadius:6,cursor:'pointer',
+                    border:`1px solid ${active?colors[m]:'var(--border)'}`,
+                    background:active?dimColors[m]:'transparent',
+                    color:active?colors[m]:'var(--muted)',transition:'all 0.15s'}}>
+                  {labels[m]}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{fontSize:11,color:'var(--muted)',marginTop:4,lineHeight:1.4}}>
+            {(policy.signalMethod||'random')==='random' && 'Random buy/sell — great for testing the system'}
+            {policy.signalMethod==='heuristic' && 'Technical analysis (RSI + momentum) — no API key needed'}
+            {policy.signalMethod==='ai' && 'Simple AI analyzes price action — requires an AI API key in secrets.json'}
+            {policy.signalMethod==='sorin' && 'Deep DeFi analysis via Sorin AI — requires Sorin & AI API keys'}
+          </div>
+
+          {/* Signal params — time windows & hyperparams (when not random) */}
+          {['heuristic','ai','sorin'].includes(policy.signalMethod) && (
+            <SignalParamsPanel policy={policy} setPolicy={setPolicy} />
+          )}
+        </Section>
+
+        <Divider />
+
+        {/* Approval mode */}
+        <Section label="Approval Mode">
+          <Toggle left="Manual" right="Automatic" value={approvalMode==='manual'?'Manual':'Automatic'}
+            onChange={v=>setApprovalMode(v==='Manual'?'manual':'policy')} activeColor="blue" />
+          <div style={{fontSize:11,color:'var(--muted)',lineHeight:1.4}}>
+            {approvalMode==='manual'
+              ? 'Each signal waits for your approval before it executes.'
+              : 'Signals execute automatically when guardrails pass.'}
+          </div>
+        </Section>
+
+        <Divider />
+
+        {/* Policy */}
+        <Section label="Policy Guardrails">
+          <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',display:'flex',flexDirection:'column',gap:10}}>
+
+            {/* Allowed assets — independent of watched */}
+            <FieldGroup label="Allowed assets">
+              <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:2}}>
+                {(policy.assets||[]).map(a => (
+                  <span key={a} style={{display:'inline-flex',alignItems:'center',gap:3,
+                    padding:'2px 5px 2px 8px',fontSize:11,fontWeight:600,borderRadius:4,
+                    border:'1px solid var(--blue)',background:'var(--blue-dim)',color:'var(--blue)',
+                    fontFamily:'JetBrains Mono'}}>
+                    {a}
+                    <button className="remove-btn" onClick={() => removeAllowedAsset(a)}
+                      style={{background:'transparent',border:'none',cursor:'pointer',
+                        color:'var(--blue)',fontSize:12,lineHeight:1,padding:'0 1px',fontWeight:700}}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <AddTickerInput onAdd={addAllowedAsset} placeholder="e.g. SOL" existing={policy.assets||[]} />
+            </FieldGroup>
+
+            <FieldGroup label="Per-trade cap">
+              <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--surface)',
+                border:'1px solid var(--border)',borderRadius:6,padding:'5px 10px'}}>
+                <span style={{fontSize:12,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>$</span>
+                <input type="number" min={1} value={policy.perTradeCap} style={{
+                  flex:1,background:'transparent',border:'none',outline:'none',fontSize:13,
+                  fontWeight:600,color:'var(--text)',fontFamily:'JetBrains Mono',width:60}}
+                  onChange={e=>setPolicy(p=>({...p,perTradeCap:Math.max(1,Number(e.target.value))}))} />
+              </div>
+            </FieldGroup>
+
+            <FieldGroup label="Daily cap">
+              <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--surface)',
+                border:'1px solid var(--border)',borderRadius:6,padding:'5px 10px'}}>
+                <span style={{fontSize:12,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>$</span>
+                <input type="number" min={1} value={policy.dailyCap} style={{
+                  flex:1,background:'transparent',border:'none',outline:'none',fontSize:13,
+                  fontWeight:600,color:'var(--text)',fontFamily:'JetBrains Mono',width:60}}
+                  onChange={e=>setPolicy(p=>({...p,dailyCap:Math.max(1,Number(e.target.value))}))} />
+              </div>
+              <div style={{height:4,background:'var(--border)',borderRadius:2,overflow:'hidden',marginTop:4}}>
+                <div style={{height:'100%',borderRadius:2,transition:'width 0.3s',
+                  width:`${Math.min(spentPct,100)}%`,
+                  background:spentPct>90?'var(--red)':spentPct>70?'var(--amber)':'var(--green)'}} />
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--muted)',fontFamily:'JetBrains Mono',marginTop:3}}>
+                <span>${(policy.dailySpent||0).toFixed(0)} spent</span>
+                <span>${policy.dailyCap} cap</span>
+              </div>
+            </FieldGroup>
+
+            <FieldGroup label="Min confidence">
+              <div style={{display:'flex',gap:4}}>
+                {['Low','Medium','High'].map(c => {
+                  const cur = policy.minConfidence||'Low';
+                  const active = cur===c;
+                  const confColor = {Low:'var(--muted)',Medium:'var(--amber)',High:'var(--green)'}[c];
+                  const confBg   = {Low:'transparent',Medium:'var(--amber-dim)',High:'var(--green-dim)'}[c];
+                  return (
+                    <button key={c} onClick={()=>setPolicy(p=>({...p,minConfidence:c}))}
+                      style={{flex:1,padding:'5px 0',fontSize:11,fontWeight:600,borderRadius:5,cursor:'pointer',
+                        border:`1px solid ${active?confColor:'var(--border)'}`,
+                        background:active?confBg:'transparent',
+                        color:active?confColor:'var(--muted)',transition:'all 0.15s'}}>
+                      {c}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{fontSize:11,color:'var(--muted)',marginTop:3}}>
+                {(policy.minConfidence||'Low')==='Low'
+                  ? 'All signals auto-execute'
+                  : `Only ${policy.minConfidence}+ signals auto-execute`}
+              </div>
+            </FieldGroup>
+          </div>
+        </Section>
+      </div>
+
+      <button onClick={onCheckNow} disabled={checking}
+        style={{margin:'0 16px 16px',padding:'10px 0',background:'var(--blue)',border:'none',
+          borderRadius:8,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',
+          transition:'opacity 0.15s',opacity:checking?0.6:1,letterSpacing:'0.01em'}}>
+        {checking ? '⟳  Checking market…' : '⚡  Check Market Now'}
+      </button>
+      {checkError && (
+        <div style={{margin:'0 16px 16px',padding:8,background:'var(--amber)',color:'#000',borderRadius:6,fontSize:12}}>
+          {checkError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CONF_RANK = {Low:1, Medium:2, High:3};
+
+function CenterPanel({ signals, approvalMode, onApprove, onDismiss, approveError }) {
+  const [confFilter,   setConfFilter]   = useState(['Low','Medium','High']);
+  const [methodFilter, setMethodFilter] = useState(['random','heuristic','ai','sorin']);
+
+  function toggle(set, setter, val) {
+    setter(prev => prev.includes(val) ? prev.filter(x=>x!==val) : [...prev, val]);
+  }
+
+  const afterStatus = signals.filter(s=>s.status!=='dismissed'||approvalMode==='manual');
+  const visible = afterStatus.filter(s =>
+    confFilter.includes(s.confidence) &&
+    methodFilter.includes(s.signalMethod || 'random')
+  );
+  const pending = signals.filter(s=>s.status==='pending').length;
+  const hidden  = afterStatus.length - visible.length;
+
+  const confColor   = {Low:'var(--muted)',Medium:'var(--amber)',High:'var(--green)'};
+  const confBg      = {Low:'transparent',Medium:'var(--amber-dim)',High:'var(--green-dim)'};
+  const methodColor = {random:'var(--muted)',heuristic:'var(--purple)',ai:'var(--green)',sorin:'var(--amber)'};
+  const methodBg    = {random:'transparent',heuristic:'var(--purple-dim)',ai:'var(--green-dim)',sorin:'var(--amber-dim)'};
+  const methodLabel = {random:'Random',heuristic:'Heuristic',ai:'Simple AI',sorin:'Sorin AI'};
+
+  return (
+    <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',borderRight:'1px solid var(--border)'}}>
+      <div style={{padding:'16px 20px 14px',borderBottom:'1px solid var(--border)',display:'flex',
+        alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:14,fontWeight:700}}>Signal Queue</span>
+          {pending>0 && (
+            <span style={{background:'var(--blue)',color:'#fff',fontSize:11,fontWeight:700,
+              borderRadius:10,padding:'1px 7px'}}>{pending}</span>
+          )}
+        </div>
+        <span style={{fontSize:11,fontWeight:500,padding:'2px 8px',borderRadius:4,
+          color:approvalMode==='policy'?'var(--blue)':'var(--muted)',
+          background:approvalMode==='policy'?'var(--blue-dim)':'transparent',
+          border:approvalMode==='policy'?'1px solid var(--blue)':'1px solid transparent'}}>
+          {approvalMode==='manual'?'Manual approval':'Automatic'}
+        </span>
+      </div>
+
+      {/* Filters: method + confidence */}
+      <div style={{padding:'7px 20px',borderBottom:'1px solid var(--border)',display:'flex',
+        flexDirection:'column',gap:5,flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontSize:11,color:'var(--muted)',width:68,flexShrink:0}}>Method</span>
+          <div style={{display:'flex',gap:3}}>
+            {['random','heuristic','ai','sorin'].map(m => {
+              const active = methodFilter.includes(m);
+              return (
+                <button key={m} onClick={()=>toggle(methodFilter, setMethodFilter, m)}
+                  style={{padding:'2px 8px',fontSize:11,fontWeight:600,borderRadius:4,cursor:'pointer',
+                    border:`1px solid ${active?methodColor[m]:'var(--border)'}`,
+                    background:active?methodBg[m]:'transparent',
+                    color:active?methodColor[m]:'var(--muted)',transition:'all 0.12s'}}>
+                  {methodLabel[m]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontSize:11,color:'var(--muted)',width:68,flexShrink:0}}>Confidence</span>
+          <div style={{display:'flex',gap:3}}>
+            {['Low','Medium','High'].map(c => {
+              const active = confFilter.includes(c);
+              return (
+                <button key={c} onClick={()=>toggle(confFilter, setConfFilter, c)}
+                  style={{padding:'2px 8px',fontSize:11,fontWeight:600,borderRadius:4,cursor:'pointer',
+                    border:`1px solid ${active?confColor[c]:'var(--border)'}`,
+                    background:active?confBg[c]:'transparent',
+                    color:active?confColor[c]:'var(--muted)',transition:'all 0.12s'}}>
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+          {hidden>0 && (
+            <span style={{fontSize:11,color:'var(--muted)',marginLeft:'auto'}}>
+              {hidden} hidden
+            </span>
+          )}
+        </div>
+      </div>
+
+      {approveError && (
+        <div style={{margin:12,padding:10,background:'var(--amber)',color:'#000',borderRadius:6,fontSize:12}}>
+          {approveError}
+        </div>
+      )}
+      <div style={{flex:1,overflowY:'auto',padding:'14px 20px',display:'flex',flexDirection:'column',gap:10}}>
+        {visible.length===0 ? (
+          <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',
+            justifyContent:'center',color:'var(--muted)',gap:8,padding:'60px 0'}}>
+            <span style={{fontSize:28,opacity:0.4}}>📡</span>
+            <span style={{fontSize:13,fontWeight:500}}>{afterStatus.length>0?'No signals match filter':'No signals yet'}</span>
+            <span style={{fontSize:12,opacity:0.7,textAlign:'center',lineHeight:1.5}}>
+              {afterStatus.length>0
+                ? `${hidden} signal${hidden!==1?'s':''} hidden by filter`
+                : 'Click "Check Market Now" below, or run the skill on your schedule via ClawApp'}
+            </span>
+          </div>
+        ) : (
+          [...visible].reverse().map(s=>(
+            <SignalCard key={s.id} signal={s} approvalMode={approvalMode}
+              onApprove={onApprove} onDismiss={onDismiss} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RightPanel({ trades, policy, execMode }) {
+  const spentPct  = (policy.dailySpent/policy.dailyCap)*100;
+  const liveCount = trades.filter(t=>t.mode==='real').length;
+  const modeLabel = execMode === 'real' ? '⚡ Real' : '◎ Simulated';
+  return (
+    <div style={{width:320,minWidth:320,display:'flex',flexDirection:'column',overflow:'hidden',background:'var(--surface)'}}>
+      <div style={{padding:'16px 20px 14px',borderBottom:'1px solid var(--border)',flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:14,fontWeight:700}}>Trade Log</span>
+            <span style={{fontSize:11,color:'var(--muted)',fontFamily:'JetBrains Mono',
+              background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:4,padding:'1px 6px'}}>
+              {modeLabel}
+            </span>
+          </div>
+          <span style={{fontSize:11,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>
+            {trades.length} trade{trades.length!==1?'s':''}
+          </span>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <StatChip label="Daily spent" value={`$${(policy.dailySpent||0).toFixed(0)}/$${policy.dailyCap}`}
+            color={spentPct>90?'var(--red)':'var(--muted)'} />
+          {liveCount>0 && <StatChip label="Live fills" value={liveCount} color="var(--amber)" />}
+        </div>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'12px 16px',display:'flex',flexDirection:'column',gap:8}}>
+        {trades.length===0 ? (
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+            color:'var(--muted)',gap:8,padding:'60px 0'}}>
+            <span style={{fontSize:24,opacity:0.4}}>📋</span>
+            <span style={{fontSize:12,fontWeight:500}}>No trades yet</span>
+            <span style={{fontSize:11,opacity:0.6,textAlign:'center',lineHeight:1.5}}>
+              Approved or auto-executed signals appear here
+            </span>
+          </div>
+        ) : (
+          [...trades].reverse().map(t=><TradeEntry key={t.id} trade={t} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Tiny layout helpers ──────────────────────────────────────────────────────
+
+function Section({ label, children }) {
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+      <span style={{fontSize:11,fontWeight:600,color:'var(--muted)',letterSpacing:'0.08em',textTransform:'uppercase'}}>{label}</span>
+      {children}
+    </div>
+  );
+}
+function Divider() {
+  return <div style={{height:1,background:'var(--border)',margin:'2px 0'}} />;
+}
+function FieldGroup({ label, children }) {
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:4}}>
+      <span style={{fontSize:11,color:'var(--muted)',fontWeight:500}}>{label}</span>
+      {children}
+    </div>
+  );
+}
+function StatChip({ label, value, color }) {
+  return (
+    <div style={{flex:1,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px'}}>
+      <div style={{fontSize:10,color:'var(--muted)',marginBottom:2}}>{label}</div>
+      <div style={{fontSize:13,fontWeight:700,color,fontFamily:'JetBrains Mono'}}>{value}</div>
+    </div>
+  );
+}
+
+// ─── App ─────────────────────────────────────────────────────────────────────
+
+const DEFAULT_WATCHED = ['BTC', 'ETH'];
+
+function App() {
+  // Watched assets: purely client-side, persisted in localStorage
+  const [watchedAssets, setWatchedAssets] = useState(() => lsGet('clawapp-watched', DEFAULT_WATCHED));
+  useEffect(() => { lsSet('clawapp-watched', watchedAssets); }, [watchedAssets]);
+
+  const [policy,       setPolicy]       = useState({ assets:['BTC','ETH'], perTradeCap:20, dailyCap:100, dailySpent:65, execMode:'paper', approvalMode:'manual', signalMethod:'random', minConfidence:'Low' });
+  const [signals,      setSignals]      = useState([]);
+  const [trades,       setTrades]       = useState([]);
+  const [cbAccounts,   setCbAccounts]   = useState(null); // null = not yet fetched
+  const [cron,         setCron]         = useState(null);
+
+  // Fetch prices for watched list + any Coinbase account holdings
+  const allPricedAssets = useMemo(() => {
+    const acctCurrencies = (cbAccounts || []).map(a => a.currency).filter(c => c !== 'USD');
+    return [...new Set([...watchedAssets, ...acctCurrencies])];
+  }, [watchedAssets, cbAccounts]);
+  const { prices, flashKey } = usePriceTicker(allPricedAssets);
+
+  // Derive last signal time from most recent signal timestamp
+  const lastSignalTime = useMemo(() => {
+    if (!signals.length) return null;
+    const ts = signals.map(s => new Date(s.timestamp).getTime()).filter(t => !isNaN(t));
+    return ts.length ? new Date(Math.max(...ts)) : null;
+  }, [signals]);
+
+  const [lastChecked,  setLastChecked]  = useState(new Date());
+  const [checking,     setChecking]     = useState(false);
+  const [checkError,   setCheckError]   = useState(null);
+  const [approveError, setApproveError] = useState(null);
+  const [serverOnline, setServerOnline] = useState(true);
+  const [lastResetAt,  setLastResetAt]   = useState(null);
+
+  const execMode     = policy.execMode     || 'paper';
+  const approvalMode = policy.approvalMode || 'manual';
+
+  // Poll Coinbase account balances when in real mode
+  useEffect(() => {
+    if (execMode !== 'real') { setCbAccounts(null); return; }
+    async function fetchAccounts() {
+      try {
+        const data = await API.accounts();
+        if (!data.error) setCbAccounts(data.accounts || []);
+      } catch {}
+    }
+    fetchAccounts();
+    const t = setInterval(fetchAccounts, 15000);
+    return () => clearInterval(t);
+  }, [execMode]);
+
+  useEffect(() => {
+    async function poll() {
+      try {
+        const state = await API.state();
+        if (state.error) return;
+        setSignals(state.signals  || []);
+        setTrades(state.trades    || []);
+        setPolicy(prev => ({ ...state.policy, execMode: state.policy.execMode || prev.execMode, approvalMode: state.policy.approvalMode || prev.approvalMode, signalMethod: state.policy.signalMethod || prev.signalMethod || 'random', minConfidence: (state.policy.minConfidence === 'off' ? 'Low' : state.policy.minConfidence) || prev.minConfidence || 'Low' }));
+        setCron(state.cron ?? null);
+        setLastResetAt(state.lastResetAt ?? null);
+        setServerOnline(true);
+      } catch {
+        setServerOnline(false);
+      }
+    }
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => clearInterval(t);
+  }, []);
+
+  function updatePolicy(updater) {
+    setPolicy(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
+      API.policy(next).catch(() => {});
+      return next;
+    });
+  }
+
+  function setExecMode(v)     { updatePolicy(p => ({ ...p, execMode: v })); }
+  function setApprovalMode(v) { updatePolicy(p => ({ ...p, approvalMode: v })); }
+  function setPolicyFields(updater) { updatePolicy(updater); }
+
+  function addWatched(ticker) {
+    setWatchedAssets(prev => prev.includes(ticker) ? prev : [...prev, ticker]);
+  }
+  function removeWatched(ticker) {
+    setWatchedAssets(prev => prev.filter(a => a !== ticker));
+  }
+
+  const handleCheckNow = useCallback(async () => {
+    if (checking) return;
+    setChecking(true);
+    setCheckError(null);
+    setLastChecked(new Date());
+    try {
+      await API.check();
+      const state = await API.state();
+      if (state.signals) setSignals(state.signals);
+      if (state.trades)  setTrades(state.trades);
+      if (state.policy)  setPolicy(prev => ({ ...state.policy, execMode: state.policy.execMode || prev.execMode, approvalMode: state.policy.approvalMode || prev.approvalMode, signalMethod: state.policy.signalMethod || prev.signalMethod || 'random', minConfidence: (state.policy.minConfidence === 'off' ? 'Low' : state.policy.minConfidence) || prev.minConfidence || 'Low' }));
+      if (state.cron != null) setCron(state.cron);
+    } catch (e) {
+      setCheckError(typeof e === 'string' ? e : (e?.message) || 'Check failed');
+    }
+    setChecking(false);
+  }, [checking]);
+
+  async function handleApprove(id) {
+    setApproveError(null);
+    setSignals(prev => prev.map(s => s.id===id ? {...s, status:'approved'} : s));
+    try {
+      await API.approve(id);
+      const state = await API.state();
+      if (state.signals) setSignals(state.signals);
+      if (state.trades)  setTrades(state.trades);
+      if (state.policy)  setPolicy(prev => ({ ...state.policy, execMode: state.policy.execMode || prev.execMode, approvalMode: state.policy.approvalMode || prev.approvalMode, signalMethod: state.policy.signalMethod || prev.signalMethod || 'random', minConfidence: (state.policy.minConfidence === 'off' ? 'Low' : state.policy.minConfidence) || prev.minConfidence || 'Low' }));
+      if (state.cron != null) setCron(state.cron);
+    } catch (e) {
+      setApproveError(typeof e === 'string' ? e : (e?.message) || 'Approve failed');
+      const state = await API.state().catch(() => null);
+      if (state?.signals) setSignals(state.signals);
+    }
+  }
+
+  async function handleDismiss(id) {
+    setSignals(prev => prev.map(s => s.id===id ? {...s, status:'dismissed'} : s));
+    API.dismiss(id).catch(() => {});
+  }
+
+  async function handleReset() {
+    await API.reset();
+  }
+
+  return (
+    <div style={{height:'100vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      {/* Topbar */}
+      <div style={{height:38,background:'var(--surface)',borderBottom:'1px solid var(--border)',
+        display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 20px',flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,fontSize:12,color:'var(--muted)',flexWrap:'wrap'}}>
+          <span>Powered by</span>
+          <span style={{fontWeight:600,color:'var(--text)'}}>🦞 ClawApp</span>
+          <span style={{width:1,height:12,background:'var(--border)',display:'inline-block'}} />
+          <div className="pulse" style={{width:7,height:7,borderRadius:'50%',background:'var(--green)',flexShrink:0}} />
+          <span>{lastSignalTime ? `Last signal: ${relTime(lastSignalTime)}` : 'Waiting for first signal…'}</span>
+          {cron?.everyMs != null && (
+            <>
+              <span style={{color:'var(--border2)'}}>·</span>
+              <span>Signal schedule: every <span style={{fontFamily:'JetBrains Mono',fontWeight:500,color:'var(--muted)'}}>{formatIntervalShort(cron.everyMs)}</span></span>
+            </>
+          )}
+          <span style={{color:'var(--border2)'}}>·</span>
+          <span>Runtime: {formatRuntime(lastResetAt)}</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {!serverOnline && <Badge label="⚠ Server offline" color="amber" />}
+          <Badge label={execMode==='real'?'⚡ Live Trading':'◎ Simulated'} color={execMode==='real'?'amber':'green'} />
+          <Badge label={approvalMode==='policy'?'⚙ Automatic':'👤 Manual'} color={approvalMode==='policy'?'blue':'muted'} />
+          <button onClick={handleReset}
+            style={{padding:'3px 10px',fontSize:11,fontWeight:600,background:'transparent',
+              border:'1px solid var(--border2)',borderRadius:4,color:'var(--muted)',cursor:'pointer'}}>
+            Reset Demo
+          </button>
+        </div>
+      </div>
+
+      {/* Stats bar */}
+      <StatsBar trades={trades} signals={signals} prices={prices} policy={policy} cbAccounts={cbAccounts} />
+
+      {/* Three-panel layout */}
+      <div style={{flex:1,display:'flex',overflow:'hidden'}}>
+        <LeftPanel
+          prices={prices} flashKey={flashKey}
+          execMode={execMode}         setExecMode={setExecMode}
+          approvalMode={approvalMode} setApprovalMode={setApprovalMode}
+          policy={policy}             setPolicy={setPolicyFields}
+          watchedAssets={watchedAssets} addWatched={addWatched} removeWatched={removeWatched}
+          onCheckNow={handleCheckNow} checking={checking} checkError={checkError}
+        />
+        <CenterPanel signals={signals} approvalMode={approvalMode}
+          onApprove={handleApprove} onDismiss={handleDismiss} approveError={approveError} />
+        <RightPanel trades={trades} policy={policy} execMode={execMode} />
+      </div>
+
+      {/* Open positions panel */}
+      <PositionsPanel trades={trades} prices={prices} execMode={execMode} cbAccounts={cbAccounts} />
+    </div>
+  );
+}
+
+function Badge({ label, color }) {
+  const map = {
+    green:{ c:'var(--green)', bg:'var(--green-dim)', b:'var(--green)' },
+    amber:{ c:'var(--amber)', bg:'var(--amber-dim)', b:'var(--amber)' },
+    blue: { c:'var(--blue)',  bg:'var(--blue-dim)',  b:'var(--blue)'  },
+    muted:{ c:'var(--muted)', bg:'transparent',      b:'var(--border)'},
+  };
+  const m = map[color]||map.muted;
+  return (
+    <span style={{fontSize:11,color:m.c,background:m.bg,border:`1px solid ${m.b}`,
+      padding:'2px 8px',borderRadius:4,fontWeight:600}}>{label}</span>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

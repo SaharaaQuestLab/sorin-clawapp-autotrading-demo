@@ -1,0 +1,6 @@
+{
+  "id": "clawapp-autotrader-check",
+  "scheduleType": "every",
+  "everyMs": 30000,
+  "human": "Every 30 seconds"
+}

@@ -1,0 +1,10 @@
+{
+  "assets": ["BTC"],
+  "perTradeCap": 20,
+  "dailyCap": 100,
+  "execMode": "paper",
+  "approvalMode": "manual",
+  "signalMethod": "random",
+  "minConfidence": "Low",
+  "clawappIntervalMinutes": 5
+}
