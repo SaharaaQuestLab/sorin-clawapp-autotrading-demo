@@ -129,56 +129,11 @@ If both keys are present, Anthropic is used. OpenAI is the fallback.
 
 The `sorin` signal method fetches a live DeFi token analysis from the Sorin API, then passes it to your AI model to generate a trading signal. It requires both a Sorin API key and an AI key (see above).
 
-### Step 1 — Create a Sorin account and log in
+### Step 1 — Get a Sorin API key
 
-**Option A: Email login**
+Sign in and create an API key at **[tools.saharaai.com/sorin-skills](http://tools.saharaai.com/sorin-skills)**.
 
-```bash
-curl -X POST 'https://dev-authentication.saharaa.info/v1/auth/email-login' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "email": "your@email.com",
-    "password": "your_password",
-    "captcha": "",
-    "role": 1
-  }'
-```
-
-**Option B: Wallet signature login**
-
-```bash
-# 1) Get a message to sign
-curl -X POST 'https://dev-authentication.saharaa.info/v1/auth/generate-message' \
-  -H 'Content-Type: application/json' \
-  -d '{"walletAddress": "0xYOUR_WALLET_ADDRESS"}'
-
-# 2) Sign the returned message with your wallet, then submit
-curl -X POST 'https://dev-authentication.saharaa.info/v1/auth/login' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "walletAddress": "0xYOUR_WALLET_ADDRESS",
-    "signature": "0xYOUR_SIGNATURE",
-    "message": "Sign this message to authenticate: ..."
-  }'
-```
-
-Both responses include a `token` field. Copy it — you need it in the next step.
-
-### Step 2 — Create a long-lived API key
-
-```bash
-curl -X POST 'https://dev-authentication.saharaa.info/v1/user/api-keys' \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer YOUR_JWT_TOKEN' \
-  -d '{
-    "name": "my-defi-api-key",
-    "scopes": "all"
-  }'
-```
-
-The response contains `data.apiKey` — a string starting with `sak_live_...`. **Save it immediately; it is only shown once.**
-
-### Step 3 — Add the key to secrets.json
+### Step 2 — Add the key to secrets.json
 
 ```json
 {
@@ -186,7 +141,7 @@ The response contains `data.apiKey` — a string starting with `sak_live_...`. *
 }
 ```
 
-### Step 4 — Set signalMethod to `sorin`
+### Step 3 — Set signalMethod to `sorin`
 
 Update `data/policy.json` or use the dashboard dropdown to switch the signal method to `sorin`.
 
