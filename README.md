@@ -129,6 +129,8 @@ If both keys are present, Anthropic is used. OpenAI is the fallback.
 
 The `sorin` signal method fetches a live DeFi token analysis from the Sorin API, then passes it to your AI model to generate a trading signal. It requires both a Sorin API key and an AI key (see above).
 
+The Sorin skill is maintained in its own repository: **[github.com/SaharaLabsAI/skills](https://github.com/SaharaLabsAI/skills)**. See that repo for installation instructions and the latest skill definition.
+
 ### Step 1 — Get a Sorin API key
 
 Sign in and create an API key at **[tools.saharaai.com/sorin-skills](http://tools.saharaai.com/sorin-skills)**.
@@ -176,7 +178,7 @@ Output is always JSON on stdout:
 | `skills/clawapp-autotrader/trader.py` | Core logic — price fetch, signal generation, Coinbase API |
 | `skills/clawapp-autotrader/SKILL.md` | ClawApp skill definition |
 | `skills/clawapp-autotrader/clawapp.json` | ClawApp skill metadata (name, entry command) |
-| `skills/sahara-intention-level-skills/` | Sorin DeFi skill (optional) |
+| [SaharaLabsAI/skills](https://github.com/SaharaLabsAI/skills) | Sorin DeFi skill — install from the upstream repo |
 | `data/policy.json` | Active policy: assets, caps, exec/approval mode, signal method |
 | `data/signals_paper.json` / `data/signals_real.json` | Signal history |
 | `data/trades_paper.json` / `data/trades_real.json` | Trade fill history |
@@ -228,7 +230,7 @@ The dashboard can't reach `server.py`. Make sure `python3 server.py` is running 
 Add `anthropic_api_key` or `openai_api_key` to `secrets.json` and run `pip install anthropic` or `pip install openai`.
 
 **Sorin signal fails with "sorin_api_key not found"**
-Add `sorin_api_key` to `secrets.json`. See [`skills/sahara-intention-level-skills/README.md`](skills/sahara-intention-level-skills/README.md) for how to obtain a key.
+Add `sorin_api_key` to `secrets.json`. See [SaharaLabsAI/skills](https://github.com/SaharaLabsAI/skills) for how to obtain a key.
 
 **Real trade fails with "Missing required scopes"**
 Your Coinbase API key is missing the **Trade** permission. Edit the key on the CDP portal, enable View and Trade, then retry.
