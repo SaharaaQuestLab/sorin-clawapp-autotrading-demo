@@ -1,3 +1,9 @@
+> [!IMPORTANT]
+> **This repository is deprecated and no longer maintained.**
+> The project has moved to a new repository: [SaharaLabsAI/sorin-clawapp-autotrading-demo](https://github.com/SaharaLabsAI/sorin-clawapp-autotrading-demo).
+
+---
+
 # ClawApp AutoTrader
 
 A self-contained crypto trading automation demo built on [ClawApp](https://clawapp.ai). Generates trade signals from live Coinbase prices, enforces configurable guardrails, and lets you approve or auto-execute trades — all visible in a real-time dashboard.
